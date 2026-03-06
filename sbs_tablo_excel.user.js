@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name         SBS Tablo Excel
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Spor Bilgi Sistemi - Verileri excel olarak indirme userscritpi
-// @author       Mahmut Elmas with the help of AI mahmutelmas@yaani.com
+// @author       Mahmut Elmas with the help of AI
 // @match        *://spor.gsb.gov.tr/*
 // @grant        GM_registerMenuCommand
-// @require      https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js
-// @require      https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js
-// @updateURL    https://raw.githubusercontent.com/mahmutelmas06/Spor-Bilgi-Sistemi-Excel/main/sbs_tablo_excel.user.js
-// @downloadURL  https://raw.githubusercontent.com/mahmutelmas06/Spor-Bilgi-Sistemi-Excel/main/sbs_tablo_excel.user.js
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @updateURL    https://raw.githubusercontent.com/KULLANICI_ADIN/REPO_ADIN/main/script.user.js
+// @downloadURL  https://raw.githubusercontent.com/KULLANICI_ADIN/REPO_ADIN/main/script.user.js
 // @run-at       document-end
 // ==/UserScript==
 
@@ -19,8 +19,36 @@
     let isRunning = false;
     let globalFilters = [];
 
+    // --- Tampermonkey Gelişmiş Menü Ayarları ---
+    let downloadFormat = GM_getValue('gsb_format', 'xlsx');
+    let waitMode = GM_getValue('gsb_wait_mode', 'auto');
+
+    GM_registerMenuCommand("⚙️ İndirme Formatı (Şu an: " + downloadFormat.toUpperCase() + ")", () => {
+        downloadFormat = downloadFormat === 'xlsx' ? 'csv' : 'xlsx';
+        GM_setValue('gsb_format', downloadFormat);
+        alert("İndirme Formatı Güncellendi: " + downloadFormat.toUpperCase() + "\n(Menü isminin güncellenmesi için sayfayı yenileyebilirsiniz)");
+    });
+
+    GM_registerMenuCommand("⏳ Sayfa Geçişi (Şu an: " + (waitMode === 'auto' ? 'OTOMATİK' : 'MANUEL') + ")", () => {
+        waitMode = waitMode === 'auto' ? 'manual' : 'auto';
+        GM_setValue('gsb_wait_mode', waitMode);
+        alert("Sayfa Geçiş Modu Güncellendi: " + (waitMode === 'auto' ? 'OTOMATİK' : 'MANUEL ONAYLI') + "\n(Menü isminin güncellenmesi için sayfayı yenileyebilirsiniz)");
+    });
+
     // --- Şık Bildirim (Toast) Sistemi ---
     function showToast(message, type = "info", duration = 4000) {
+        let container = document.getElementById('gsb-toast-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'gsb-toast-container';
+            Object.assign(container.style, {
+                position: 'fixed', top: '25px', right: '25px', zIndex: '2147483647',
+                display: 'flex', flexDirection: 'column', gap: '10px',
+                pointerEvents: 'none', alignItems: 'flex-end'
+            });
+            document.body.appendChild(container);
+        }
+
         const toast = document.createElement('div');
         let bgColor = '#3498db';
         if (type === 'success') bgColor = '#2ecc71';
@@ -28,20 +56,25 @@
         else if (type === 'error') bgColor = '#e74c3c';
 
         Object.assign(toast.style, {
-            position: 'fixed', top: '25px', right: '25px', zIndex: '2147483647',
             backgroundColor: bgColor, color: 'white', padding: '15px 25px',
             borderRadius: '8px', boxShadow: '0 5px 15px rgba(0,0,0,0.3)',
             fontFamily: 'Segoe UI, sans-serif', fontSize: '14px', fontWeight: 'bold',
-            opacity: '0', transition: 'opacity 0.4s ease, transform 0.4s ease',
-            transform: 'translateY(-20px)', pointerEvents: 'none'
+            opacity: '0', transition: 'all 0.4s ease',
+            transform: 'translateX(50px)', pointerEvents: 'auto',
+            maxWidth: '350px', wordWrap: 'break-word'
         });
 
         toast.innerHTML = message;
-        document.body.appendChild(toast);
+        container.appendChild(toast);
 
-        setTimeout(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; }, 10);
         setTimeout(() => {
-            toast.style.opacity = '0'; toast.style.transform = 'translateY(-20px)';
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateX(0)';
+        }, 10);
+
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(50px)';
             setTimeout(() => toast.remove(), 400);
         }, duration);
     }
@@ -77,7 +110,6 @@
         return sig;
     }
 
-    // Verileri Çekme ve GELİŞMİŞ FİLTRELEME Fonksiyonu
     function getTableRows(includeHeader, tableElement, selectedIndices = null, appliedFilters = []) {
         if (!tableElement) return [];
         let rows = [];
@@ -134,7 +166,6 @@
         return rows;
     }
 
-    // --- Excel Oluşturucu ---
     async function generateExcel(data, fileName, useExcelJS) {
         if (!useExcelJS || typeof ExcelJS === 'undefined') {
             let csvContent = "\uFEFF";
@@ -209,46 +240,75 @@
             const floatingBtn = document.getElementById('gsb-floating-btn');
             showToast("⏳ Tarama başlıyor... Lütfen bekleyin.", "info", 4000);
 
-            if (endPage === Infinity && activeTable) {
-                if (floatingBtn) floatingBtn.innerHTML = `⏳ 100 Kayıt...`;
-                let clicked = false;
-                if (activeTable.id) {
-                    const script = document.createElement('script');
-                    script.textContent = `try { var $t = $('#${activeTable.id}'); var opt = $t.bootstrapTable('getOptions'); if(opt && opt.pageSize < 100) { $t.bootstrapTable('refreshOptions', { pageSize: 100 }); } } catch(e) {}`;
-                    document.body.appendChild(script);
-                    script.remove();
-                    clicked = true;
-                }
-                const maxLink = Array.from(document.querySelectorAll('.page-list .dropdown-menu li a')).find(a => a.innerText.trim() === '100');
-                if (maxLink) { maxLink.click(); clicked = true; }
-                if (clicked) {
-                    await new Promise(r => setTimeout(r, 2500));
-                    activeTable = getActiveTable();
-                }
-            }
-
-            async function waitForDataChange(oldRawSignature, maxWait = 12) {
-                for (let i = 0; i < maxWait; i++) {
+            // --- AKILLI BEKLEME MOTORU ---
+            async function waitForDataChange(oldRawSignature, maxWait = 25) {
+                let i = 0;
+                while (i < maxWait) {
                     await new Promise(r => setTimeout(r, 400));
+
                     let tbl = getActiveTable();
-                    if (!tbl) continue;
                     let newSig = getPageRawSignature(tbl);
-                    if (newSig !== oldRawSignature && newSig !== "") {
+
+                    if (waitMode === 'auto') {
+                        let isLoading = false;
+
+                        // 1. Standart Yükleme İbareleri (GSB ve Bootstrap)
+                        if (document.querySelector('.fixed-table-loading:not([style*="display: none"])') ||
+                            document.querySelector('.blockOverlay') ||
+                            document.querySelector('.loading-message')) {
+                            isLoading = true;
+                        }
+
+                        // 2. Tablonun Verisi Geçici Olarak Boşaltıldıysa (DOM Yenileniyorsa)
+                        if (newSig === "") {
+                            isLoading = true;
+                        }
+
+                        // Eğer sayfa yükleniyorsa süreden YEME, sayacı dondur ve bekle!
+                        if (isLoading) { continue; }
+                    }
+
+                    if (tbl && newSig !== oldRawSignature && newSig !== "") {
                         await new Promise(r => setTimeout(r, 400));
                         return newSig;
                     }
+
+                    i++;
+
+                    if (i >= maxWait && waitMode === 'manual') {
+                        let userWantsToFinish = confirm("⏳ ZAMAN AŞIMI! (Veri değişmedi)\n\nİnternet bağlantınız yavaş olabilir veya sayfanın yüklenmesi hala tamamlanmadı.\n\nİndirmeyi BİTİRİP şimdiye kadar olanları Excel'e aktarmak için: [TAMAM / OK]\nBeklemeye DEVAM ETMEK için: [İPTAL / CANCEL] tuşuna basın.");
+                        if (!userWantsToFinish) {
+                            i = 0; // İptale basarsa sayacı sıfırla, beklemeye devam et
+                        }
+                    }
                 }
                 return null;
+            }
+
+            // 10'DAN 100'E GEÇİŞ (SABİT SÜRE KALDIRILDI)
+            if (endPage === Infinity && activeTable) {
+                if (floatingBtn) floatingBtn.innerHTML = `⏳ 100 Kayıt...`;
+                const maxLink = Array.from(document.querySelectorAll('.page-list .dropdown-menu li a')).find(a => a.innerText.trim() === '100');
+
+                if (maxLink && !maxLink.parentElement.classList.contains('active')) {
+                    let pre100Sig = getPageRawSignature(activeTable);
+                    maxLink.click();
+                    // 2.5 sn sabit bekleme yerine artık akıllı motora emanet:
+                    await waitForDataChange(pre100Sig, 25);
+                    activeTable = getActiveTable();
+                }
             }
 
             let allData = [];
             let pagesScraped = 0;
 
             let initialSig = getPageRawSignature(activeTable);
-            while(initialSig === "") {
+            let emptyCheckCounter = 0;
+            while(initialSig === "" && emptyCheckCounter < 10) {
                 await new Promise(r => setTimeout(r, 500));
                 activeTable = getActiveTable();
                 initialSig = getPageRawSignature(activeTable);
+                emptyCheckCounter++;
             }
             let currentRawSignature = initialSig;
 
@@ -269,7 +329,7 @@
                     targetBtn.click();
                 }
 
-                let newSig = await waitForDataChange(currentRawSignature, 12);
+                let newSig = await waitForDataChange(currentRawSignature, 25);
                 if (!newSig) showToast(`⚠️ Sayfaya atlama doğrulanamadı. Elimizdeki veriyi indiriyoruz.`, "warning");
                 else currentRawSignature = newSig;
             }
@@ -300,9 +360,9 @@
                     nextBtn.click();
                 }
 
-                let newSig = await waitForDataChange(currentRawSignature, 12);
+                let newSig = await waitForDataChange(currentRawSignature, 25);
                 if (!newSig) {
-                    showToast(`⚠️ Sonraki sayfaya geçiş zaman aşımına uğradı. Kalanlar indiriliyor.`, "warning");
+                    showToast(`⚠️ Sonraki sayfaya geçiş yapılamadı. Mevcut liste indiriliyor.`, "warning");
                     break;
                 }
                 currentRawSignature = newSig;
@@ -313,7 +373,7 @@
                 const tabName = document.querySelector('.nav-tabs li.active a')?.innerText.trim().replace(/[^a-zA-Z0-9]/g, '_') || 'GSB_Veri';
                 let rangeText = isCurrentOnly ? "TekSayfa" : (endPage === Infinity ? "TumSayfalar" : `Sayfa${startPage}-${startPage + pagesScraped - 1}`);
                 const fileName = `${tabName}_${rangeText}_${new Date().toLocaleDateString().replace(/\./g,'-')}`;
-                await generateExcel(allData, fileName, useExcelJS);
+                await generateExcel(allData, fileName, downloadFormat === 'xlsx');
             } else {
                 showToast("Filtrelere uyan hiçbir veri bulunamadı.", "warning");
             }
@@ -351,17 +411,7 @@
         let filterOptionsHtml = headers.map((h, i) => `<option value="${i}">${h}</option>`).join('');
 
         modal.innerHTML = `
-            <h3 style="margin:0 0 15px 0; color:#1d6f42; text-align:center;">📊 Excel Aktarım (V40.0)</h3>
-
-            <div style="background:#f9f9f9; padding:12px; border-radius:8px; margin-bottom:10px; border:1px solid #eee;">
-                <div style="font-size:13px; font-weight:bold; color:#555; margin-bottom:8px;">İndirme Formatı:</div>
-                <label style="display:flex; align-items:center; cursor:pointer; font-size:13px; color:#333; margin-bottom:5px;">
-                    <input type="radio" name="gsb-format" value="xlsx" checked style="margin-right:8px; width:16px; height:16px;"> Gelişmiş Excel (.xlsx)
-                </label>
-                <label style="display:flex; align-items:center; cursor:pointer; font-size:13px; color:#333;">
-                    <input type="radio" name="gsb-format" value="csv" style="margin-right:8px; width:16px; height:16px;"> Basit CSV (.csv)
-                </label>
-            </div>
+            <h3 style="margin:0 0 15px 0; color:#1d6f42; text-align:center;">📊 Excel Aktarım (V41.3)</h3>
 
             <div style="background:#f9f9f9; padding:10px; border-radius:8px; margin-bottom:10px; border:1px solid #eee;">
                 <label style="display:flex; align-items:center; cursor:pointer; font-weight:bold; color:#333; font-size:13px;">
@@ -396,7 +446,7 @@
                     <div style="margin-top:10px; border-top:1px dashed #9bc2aa; padding-top:10px;">
                         <div style="font-size:12px; font-weight:bold; color:#1d6f42; margin-bottom:5px;">💾 Kayıtlı Şablonlar</div>
                         <div style="display:flex; gap:5px; margin-bottom:5px;">
-                            <input type="text" id="gsb-preset-name" placeholder="Bu filtre grubuna isim ver" style="flex:1; padding:6px; font-size:11px; border:1px solid #ccc; border-radius:4px;">
+                            <input type="text" id="gsb-preset-name" placeholder="Filtre grubuna isim ver" style="flex:1; padding:6px; font-size:11px; border:1px solid #ccc; border-radius:4px;">
                             <button id="gsb-save-preset-btn" style="padding:6px 12px; background:#3498db; color:white; border:none; border-radius:4px; font-size:11px; cursor:pointer; font-weight:bold;">Kaydet</button>
                         </div>
                         <div style="display:flex; gap:5px;">
@@ -481,7 +531,6 @@
             renderFilters();
         };
 
-        // HAFIZA İŞLEMLERİ
         function updatePresetSelect() {
             const select = document.getElementById('gsb-preset-select');
             select.innerHTML = '<option value="">-- Kayıtlı Şablon Seç --</option>';
@@ -492,14 +541,14 @@
                 select.appendChild(opt);
             }
         }
-        updatePresetSelect(); // Açılışta doldur
+        updatePresetSelect();
 
         document.getElementById('gsb-save-preset-btn').onclick = () => {
             const name = document.getElementById('gsb-preset-name').value.trim();
             if (!name) { showToast("Lütfen şablon için bir isim yazın.", "warning"); return; }
-            if (globalFilters.length === 0) { showToast("Kaydedilecek aktif bir filtre yok. Önce yukarıdan kural ekleyin.", "warning"); return; }
+            if (globalFilters.length === 0) { showToast("Kaydedilecek aktif bir filtre yok. Önce kural ekleyin.", "warning"); return; }
 
-            savedPresets[name] = JSON.parse(JSON.stringify(globalFilters)); // Filtreleri kopyala
+            savedPresets[name] = JSON.parse(JSON.stringify(globalFilters));
             localStorage.setItem('gsb_filter_presets', JSON.stringify(savedPresets));
             document.getElementById('gsb-preset-name').value = '';
             updatePresetSelect();
@@ -510,7 +559,7 @@
             const name = document.getElementById('gsb-preset-select').value;
             if (!name || !savedPresets[name]) { showToast("Lütfen yüklenecek bir şablon seçin.", "warning"); return; }
 
-            globalFilters = JSON.parse(JSON.stringify(savedPresets[name])); // Şablonu global listeye yükle
+            globalFilters = JSON.parse(JSON.stringify(savedPresets[name]));
             renderFilters();
             showToast(`📂 "${name}" filtreleri yüklendi!`, "info");
         };
@@ -525,10 +574,8 @@
             showToast(`🗑️ "${name}" silindi.`, "info");
         };
 
-        const checkFormat = () => document.querySelector('input[name="gsb-format"]:checked').value === 'xlsx';
-
-        document.getElementById('gsb-btn-one').onclick = () => startDownload(null, null, checkFormat(), true);
-        document.getElementById('gsb-btn-all').onclick = () => startDownload(1, Infinity, checkFormat(), false);
+        document.getElementById('gsb-btn-one').onclick = () => startDownload(null, null, downloadFormat === 'xlsx', true);
+        document.getElementById('gsb-btn-all').onclick = () => startDownload(1, Infinity, downloadFormat === 'xlsx', false);
         document.getElementById('gsb-btn-custom').onclick = () => {
             const start = parseInt(document.getElementById('gsb-input-start').value);
             const end = parseInt(document.getElementById('gsb-input-end').value);
@@ -537,7 +584,7 @@
                 showToast("⚠️ Lütfen geçerli bir sayfa aralığı girin (Örn: 3 ve 5).", "warning");
                 return;
             }
-            startDownload(start, end, checkFormat(), false);
+            startDownload(start, end, downloadFormat === 'xlsx', false);
         };
     }
 
