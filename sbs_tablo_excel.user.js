@@ -1,15 +1,17 @@
 // ==UserScript==
 // @name         SBS Tablo Excel
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.4
 // @description  Spor Bilgi Sistemi - Verileri excel olarak indirme userscritpi
 // @author       Mahmut Elmas with the help of AI
 // @match        *://spor.gsb.gov.tr/*
 // @grant        GM_registerMenuCommand
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @updateURL    https://raw.githubusercontent.com/KULLANICI_ADIN/REPO_ADIN/main/script.user.js
-// @downloadURL  https://raw.githubusercontent.com/KULLANICI_ADIN/REPO_ADIN/main/script.user.js
+// @require      https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js
+// @require      https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js
+// @updateURL    https://raw.githubusercontent.com/mahmutelmas06/Spor-Bilgi-Sistemi-Excel/main/sbs_tablo_excel.user.js
+// @downloadURL  https://raw.githubusercontent.com/Kmahmutelmas06/Spor-Bilgi-Sistemi-Excel/main/sbs_tablo_excel.user.js
 // @run-at       document-end
 // ==/UserScript==
 
@@ -95,7 +97,7 @@
             if (tableInTab && tableInTab.offsetWidth > 0) return tableInTab;
         }
         const allTables = Array.from(document.querySelectorAll('.fixed-table-body table, .bootstrap-table table'));
-        const visibleTable = allTables.find(t => t.offsetWidth > 0 && t.offsetHeight > 0);
+        const visibleTable = allTables.find(t => t.offsetWidth > 0 && t.offsetHeight > 0 && (!t.closest('.tab-pane') || t.closest('.tab-pane').classList.contains('active')));
         return visibleTable || document.querySelector('table[id*="grid" i], table[id*="Grid" i], table[id*="Listesi" i]');
     }
 
@@ -190,7 +192,7 @@
 
             const headerRow = worksheet.getRow(1);
             headerRow.eachCell((cell) => {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D6F42' } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF31708F' } }; // Başlık rengini sistemle uyumlu mavi tonu yaptım
                 cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
                 cell.alignment = { vertical: 'middle', horizontal: 'center' };
                 cell.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
@@ -211,7 +213,7 @@
             showToast("✅ Gelişmiş Excel (.xlsx) başarıyla oluşturuldu!", "success");
         } catch (e) {
             console.error("Excel Hatası:", e);
-            showToast("❌ Excel oluşturulurken hata oluştu.", "error");
+            showToast("❌ Excel oluşturulurken hata oluştu. Lütfen konsolu kontrol edin.", "error");
         }
     }
 
@@ -240,6 +242,9 @@
             const floatingBtn = document.getElementById('gsb-floating-btn');
             showToast("⏳ Tarama başlıyor... Lütfen bekleyin.", "info", 4000);
 
+            // Sadece aktif sekme içindeki elemanları aramak için referans alıyoruz
+            const activeTabPane = document.querySelector('.tab-pane.active.in') || document.querySelector('.tab-pane.active') || document;
+
             // --- AKILLI BEKLEME MOTORU ---
             async function waitForDataChange(oldRawSignature, maxWait = 25) {
                 let i = 0;
@@ -252,10 +257,10 @@
                     if (waitMode === 'auto') {
                         let isLoading = false;
 
-                        // 1. Standart Yükleme İbareleri (GSB ve Bootstrap)
-                        if (document.querySelector('.fixed-table-loading:not([style*="display: none"])') ||
-                            document.querySelector('.blockOverlay') ||
-                            document.querySelector('.loading-message')) {
+                        // 1. Standart Yükleme İbareleri (Sadece aktif sekmede ara)
+                        if (activeTabPane.querySelector('.fixed-table-loading:not([style*="display: none"])') ||
+                            activeTabPane.querySelector('.blockOverlay') ||
+                            activeTabPane.querySelector('.loading-message')) {
                             isLoading = true;
                         }
 
@@ -264,7 +269,6 @@
                             isLoading = true;
                         }
 
-                        // Eğer sayfa yükleniyorsa süreden YEME, sayacı dondur ve bekle!
                         if (isLoading) { continue; }
                     }
 
@@ -285,15 +289,14 @@
                 return null;
             }
 
-            // 10'DAN 100'E GEÇİŞ (SABİT SÜRE KALDIRILDI)
+            // 10'DAN 100'E GEÇİŞ (Sadece aktif sekmede aranıyor)
             if (endPage === Infinity && activeTable) {
                 if (floatingBtn) floatingBtn.innerHTML = `⏳ 100 Kayıt...`;
-                const maxLink = Array.from(document.querySelectorAll('.page-list .dropdown-menu li a')).find(a => a.innerText.trim() === '100');
+                const maxLink = Array.from(activeTabPane.querySelectorAll('.page-list .dropdown-menu li a')).find(a => a.innerText.trim() === '100');
 
                 if (maxLink && !maxLink.parentElement.classList.contains('active')) {
                     let pre100Sig = getPageRawSignature(activeTable);
                     maxLink.click();
-                    // 2.5 sn sabit bekleme yerine artık akıllı motora emanet:
                     await waitForDataChange(pre100Sig, 25);
                     activeTable = getActiveTable();
                 }
@@ -312,13 +315,14 @@
             }
             let currentRawSignature = initialSig;
 
-            let activeBtn = document.querySelector('.pagination li.active a, .pagination li.page-item.active a, .page-number.active a');
+            // Sadece aktif sekmedeki aktif sayfayı bul
+            let activeBtn = activeTabPane.querySelector('.pagination li.active a, .pagination li.page-item.active a, .page-number.active a');
             let currentUIPage = activeBtn ? parseInt(activeBtn.innerText.trim()) : 1;
             if (isNaN(currentUIPage)) currentUIPage = 1;
 
             if (!isCurrentOnly && startPage > 1 && startPage !== currentUIPage) {
                 if (floatingBtn) floatingBtn.innerHTML = `⏳ ${startPage}. Sayfaya Atlanıyor...`;
-                let targetBtn = Array.from(document.querySelectorAll('.pagination li a')).find(a => parseInt(a.innerText.trim()) === startPage);
+                let targetBtn = Array.from(activeTabPane.querySelectorAll('.pagination li a')).find(a => parseInt(a.innerText.trim()) === startPage);
 
                 if (activeTable.id) {
                     const script = document.createElement('script');
@@ -346,7 +350,8 @@
 
                 if (currentPageNum >= targetEndPage) break;
 
-                let nextBtn = document.querySelector('.pagination li.page-next a, .pagination li.next a');
+                // Sadece aktif sekmedeki "İleri" butonunu bul
+                let nextBtn = activeTabPane.querySelector('.pagination li.page-next a, .pagination li.next a');
                 let nextLi = nextBtn ? nextBtn.closest('li') : null;
                 if (!nextBtn || (nextLi && nextLi.classList.contains('disabled'))) break;
 
