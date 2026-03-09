@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SBS Tablo Excel
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.5
 // @description  Spor Bilgi Sistemi - Verileri excel olarak indirme userscritpi
 // @author       Mahmut Elmas with the help of AI
 // @match        *://spor.gsb.gov.tr/*
@@ -13,13 +13,64 @@
 // @updateURL    https://raw.githubusercontent.com/mahmutelmas06/Spor-Bilgi-Sistemi-Excel/main/sbs_tablo_excel.user.js
 // @downloadURL  https://raw.githubusercontent.com/mahmutelmas06/Spor-Bilgi-Sistemi-Excel/main/sbs_tablo_excel.user.js
 // @run-at       document-end
+// @exclude      https://spor.gsb.gov.tr/SayfayaYonlendir.aspx
+// @exclude      https://spor.gsb.gov.tr/MainSicilLisans.aspx
+// @exclude      https://spor.gsb.gov.tr/Login/?AppId=1&ReturnUrl=%2f
+// @exclude      https://spor.gsb.gov.tr/edevletbasvuru/*
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    let isRunning = false;
-    let globalFilters = [];
+    // --- Ayar Değişikliği Uyarı Modalı ---
+    function showRefreshModal(settingName, newValue) {
+        const overlay = document.createElement('div');
+        Object.assign(overlay.style, {
+            position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
+            backgroundColor: 'rgba(0,0,0,0.6)', zIndex: '2147483647',
+            display: 'flex', justifyContent: 'center', alignItems: 'center'
+        });
+
+        const modal = document.createElement('div');
+        Object.assign(modal.style, {
+            backgroundColor: '#fff', padding: '20px 25px', borderRadius: '10px',
+            boxShadow: '0 5px 15px rgba(0,0,0,0.3)', textAlign: 'center',
+            fontFamily: 'Segoe UI, sans-serif', minWidth: '320px'
+        });
+
+        modal.innerHTML = `
+            <h4 style="margin: 0 0 10px 0; color: #1d6f42;">Ayar Güncellendi</h4>
+            <p style="margin: 0 0 20px 0; font-size: 14px; color: #333;">
+                <b>${settingName}</b>: <span style="color:#e74c3c; font-weight:bold;">${newValue}</span><br><br>
+                Değişikliklerin etkili olması için sayfayı yenileyin.
+            </p>
+        `;
+
+        const btnContainer = document.createElement('div');
+        Object.assign(btnContainer.style, { display: 'flex', gap: '10px', justifyContent: 'center' });
+
+        const btnRefresh = document.createElement('button');
+        btnRefresh.innerText = 'Yenile';
+        Object.assign(btnRefresh.style, {
+            padding: '8px 15px', backgroundColor: '#3498db', color: 'white',
+            border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', flex: '1'
+        });
+        btnRefresh.onclick = () => location.reload();
+
+        const btnLater = document.createElement('button');
+        btnLater.innerText = 'Sonra Yenile';
+        Object.assign(btnLater.style, {
+            padding: '8px 15px', backgroundColor: '#95a5a6', color: 'white',
+            border: 'none', borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold', flex: '1'
+        });
+        btnLater.onclick = () => overlay.remove();
+
+        btnContainer.appendChild(btnRefresh);
+        btnContainer.appendChild(btnLater);
+        modal.appendChild(btnContainer);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+    }
 
     // --- Tampermonkey Gelişmiş Menü Ayarları ---
     let downloadFormat = GM_getValue('gsb_format', 'xlsx');
@@ -28,14 +79,17 @@
     GM_registerMenuCommand("⚙️ İndirme Formatı (Şu an: " + downloadFormat.toUpperCase() + ")", () => {
         downloadFormat = downloadFormat === 'xlsx' ? 'csv' : 'xlsx';
         GM_setValue('gsb_format', downloadFormat);
-        alert("İndirme Formatı Güncellendi: " + downloadFormat.toUpperCase() + "\n(Menü isminin güncellenmesi için sayfayı yenileyebilirsiniz)");
+        showRefreshModal("İndirme Formatı", downloadFormat.toUpperCase());
     });
 
     GM_registerMenuCommand("⏳ Sayfa Geçişi (Şu an: " + (waitMode === 'auto' ? 'OTOMATİK' : 'MANUEL') + ")", () => {
         waitMode = waitMode === 'auto' ? 'manual' : 'auto';
         GM_setValue('gsb_wait_mode', waitMode);
-        alert("Sayfa Geçiş Modu Güncellendi: " + (waitMode === 'auto' ? 'OTOMATİK' : 'MANUEL ONAYLI') + "\n(Menü isminin güncellenmesi için sayfayı yenileyebilirsiniz)");
+        showRefreshModal("Sayfa Geçiş Modu", waitMode === 'auto' ? 'OTOMATİK' : 'MANUEL ONAYLI');
     });
+
+    let isRunning = false;
+    let globalFilters = [];
 
     // --- Şık Bildirim (Toast) Sistemi ---
     function showToast(message, type = "info", duration = 4000) {
@@ -112,7 +166,8 @@
         return sig;
     }
 
-    function getTableRows(includeHeader, tableElement, selectedIndices = null, appliedFilters = []) {
+    // antrenorAdi parametresi eklendi
+    function getTableRows(includeHeader, tableElement, selectedIndices = null, appliedFilters = [], antrenorAdi = "") {
         if (!tableElement) return [];
         let rows = [];
 
@@ -121,7 +176,11 @@
             headRows.forEach(row => {
                 let allCols = Array.from(row.querySelectorAll("th")).map(col => col.innerText.trim());
                 let filteredCols = selectedIndices ? allCols.filter((_, idx) => selectedIndices.includes(idx)) : allCols;
-                if (filteredCols.length > 0) rows.push(filteredCols);
+                if (filteredCols.length > 0) {
+                    // Eğer sayfadan antrenör adı alındıysa başlığa yeni sütun ekle
+                    if (antrenorAdi) filteredCols.push("Antrenör Ad Soyad");
+                    rows.push(filteredCols);
+                }
             });
         }
 
@@ -163,7 +222,11 @@
             if (!passesFilters) return;
 
             let filteredCells = selectedIndices ? allCells.filter((_, idx) => selectedIndices.includes(idx)) : allCells;
-            if (filteredCells.length > 0) rows.push(filteredCells);
+            if (filteredCells.length > 0) {
+                // Sütun sonuna antrenör adını ekle
+                if (antrenorAdi) filteredCells.push(antrenorAdi);
+                rows.push(filteredCells);
+            }
         });
         return rows;
     }
@@ -192,7 +255,7 @@
 
             const headerRow = worksheet.getRow(1);
             headerRow.eachCell((cell) => {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF31708F' } }; // Başlık rengini sistemle uyumlu mavi tonu yaptım
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF31708F' } };
                 cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
                 cell.alignment = { vertical: 'middle', horizontal: 'center' };
                 cell.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
@@ -242,10 +305,15 @@
             const floatingBtn = document.getElementById('gsb-floating-btn');
             showToast("⏳ Tarama başlıyor... Lütfen bekleyin.", "info", 4000);
 
-            // Sadece aktif sekme içindeki elemanları aramak için referans alıyoruz
+            // Antrenör ismini çekme mantığı (Eğer sayfada varsa)
+            let currentAntrenorAdi = "";
+            const lblAntrenor = document.getElementById('lblAntrenorAdSoyad');
+            if (lblAntrenor && lblAntrenor.innerText.trim() !== "") {
+                currentAntrenorAdi = lblAntrenor.innerText.trim();
+            }
+
             const activeTabPane = document.querySelector('.tab-pane.active.in') || document.querySelector('.tab-pane.active') || document;
 
-            // --- AKILLI BEKLEME MOTORU ---
             async function waitForDataChange(oldRawSignature, maxWait = 25) {
                 let i = 0;
                 while (i < maxWait) {
@@ -256,20 +324,14 @@
 
                     if (waitMode === 'auto') {
                         let isLoading = false;
-
-                        // 1. Standart Yükleme İbareleri (Sadece aktif sekmede ara)
                         if (activeTabPane.querySelector('.fixed-table-loading:not([style*="display: none"])') ||
                             activeTabPane.querySelector('.blockOverlay') ||
                             activeTabPane.querySelector('.loading-message')) {
                             isLoading = true;
                         }
 
-                        // 2. Tablonun Verisi Geçici Olarak Boşaltıldıysa (DOM Yenileniyorsa)
-                        if (newSig === "") {
-                            isLoading = true;
-                        }
-
-                        if (isLoading) { continue; }
+                        if (newSig === "") isLoading = true;
+                        if (isLoading) continue;
                     }
 
                     if (tbl && newSig !== oldRawSignature && newSig !== "") {
@@ -282,14 +344,13 @@
                     if (i >= maxWait && waitMode === 'manual') {
                         let userWantsToFinish = confirm("⏳ ZAMAN AŞIMI! (Veri değişmedi)\n\nİnternet bağlantınız yavaş olabilir veya sayfanın yüklenmesi hala tamamlanmadı.\n\nİndirmeyi BİTİRİP şimdiye kadar olanları Excel'e aktarmak için: [TAMAM / OK]\nBeklemeye DEVAM ETMEK için: [İPTAL / CANCEL] tuşuna basın.");
                         if (!userWantsToFinish) {
-                            i = 0; // İptale basarsa sayacı sıfırla, beklemeye devam et
+                            i = 0;
                         }
                     }
                 }
                 return null;
             }
 
-            // 10'DAN 100'E GEÇİŞ (Sadece aktif sekmede aranıyor)
             if (endPage === Infinity && activeTable) {
                 if (floatingBtn) floatingBtn.innerHTML = `⏳ 100 Kayıt...`;
                 const maxLink = Array.from(activeTabPane.querySelectorAll('.page-list .dropdown-menu li a')).find(a => a.innerText.trim() === '100');
@@ -315,7 +376,6 @@
             }
             let currentRawSignature = initialSig;
 
-            // Sadece aktif sekmedeki aktif sayfayı bul
             let activeBtn = activeTabPane.querySelector('.pagination li.active a, .pagination li.page-item.active a, .page-number.active a');
             let currentUIPage = activeBtn ? parseInt(activeBtn.innerText.trim()) : 1;
             if (isNaN(currentUIPage)) currentUIPage = 1;
@@ -344,13 +404,13 @@
             while (currentPageNum <= targetEndPage) {
                 if (floatingBtn && !isCurrentOnly) floatingBtn.innerHTML = `⏳ Sayfa: ${currentPageNum}...`;
 
-                let rowsToSave = getTableRows(pagesScraped === 0, getActiveTable(), selectedIndices, currentActiveFilters);
+                // currentAntrenorAdi'ni getTableRows'a gönderiyoruz
+                let rowsToSave = getTableRows(pagesScraped === 0, getActiveTable(), selectedIndices, currentActiveFilters, currentAntrenorAdi);
                 allData = allData.concat(rowsToSave);
                 pagesScraped++;
 
                 if (currentPageNum >= targetEndPage) break;
 
-                // Sadece aktif sekmedeki "İleri" butonunu bul
                 let nextBtn = activeTabPane.querySelector('.pagination li.page-next a, .pagination li.next a');
                 let nextLi = nextBtn ? nextBtn.closest('li') : null;
                 if (!nextBtn || (nextLi && nextLi.classList.contains('disabled'))) break;
@@ -394,7 +454,10 @@
         if (document.getElementById('gsb-modal-overlay')) return;
 
         globalFilters = [];
-        let savedPresets = JSON.parse(localStorage.getItem('gsb_filter_presets')) || {};
+        let savedPresets = {};
+        try {
+            savedPresets = JSON.parse(localStorage.getItem('gsb_filter_presets')) || {};
+        } catch(e) { console.warn("Filtre geçmişi okunamadı."); }
 
         const table = getActiveTable();
         const headers = Array.from(table?.querySelectorAll("thead th") || []).map((th, i) => th.innerText.trim() || ("Sütun " + (i + 1)));
@@ -416,7 +479,7 @@
         let filterOptionsHtml = headers.map((h, i) => `<option value="${i}">${h}</option>`).join('');
 
         modal.innerHTML = `
-            <h3 style="margin:0 0 15px 0; color:#1d6f42; text-align:center;">📊 Excel Aktarım (V41.3)</h3>
+            <h3 style="margin:0 0 15px 0; color:#1d6f42; text-align:center;">📊 Excel Aktarım </h3>
 
             <div style="background:#f9f9f9; padding:10px; border-radius:8px; margin-bottom:10px; border:1px solid #eee;">
                 <label style="display:flex; align-items:center; cursor:pointer; font-weight:bold; color:#333; font-size:13px;">
@@ -612,10 +675,13 @@
         let isDragging = false, startX, startY, startLeft, startTop;
 
         const onMouseMove = (ev) => {
-            isDragging = true;
-            btn.style.left = startLeft + (ev.clientX - startX) + 'px';
-            btn.style.top = startTop + (ev.clientY - startY) + 'px';
-            btn.style.bottom = 'auto'; btn.style.right = 'auto';
+            // SADECE fare 5 pikselden fazla hareket ederse "Sürüklendi" olarak işaretle
+            if (Math.abs(ev.clientX - startX) > 5 || Math.abs(ev.clientY - startY) > 5) {
+                isDragging = true;
+                btn.style.left = startLeft + (ev.clientX - startX) + 'px';
+                btn.style.top = startTop + (ev.clientY - startY) + 'px';
+                btn.style.bottom = 'auto'; btn.style.right = 'auto';
+            }
         };
 
         const onMouseUp = () => {
@@ -631,7 +697,9 @@
             document.addEventListener('mouseup', onMouseUp);
         });
 
-        btn.addEventListener('click', () => { if (!isDragging) showModal(); });
+        btn.addEventListener('click', () => {
+            if (!isDragging) showModal();
+        });
         document.body.appendChild(btn);
     }
 
